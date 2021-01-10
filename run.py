@@ -1,6 +1,7 @@
 from collections import namedtuple
 import logging as logger
 import time as time
+from datetime import datetime
 from bs4 import BeautifulSoup
 from requests import request, status_codes
 from selenium import webdriver
@@ -11,7 +12,7 @@ import icalendar as ical
 
 
 class BaseParser(object):
-    Event = namedtuple("Event", field_names=["time", "name", "url", "place"], defaults=["", "", "", ""])
+    Event = namedtuple("Event", field_names=["time", "name", "url", "place", "note"], defaults=["", "", "", "", ""])
 
     def __init__(self):
         pass
@@ -20,7 +21,18 @@ class BaseParser(object):
         pass
 
     def export_to_cal(self, file_path = "Events.ics"):
-        pass
+        calendar = ical.Calendar()
+        for event in self.parsed_events:
+            new_event = ical.Event()
+            start_time = datetime.strptime(event.time, "%d %b %Y %H:%M")
+            new_event["dtstart"] = ical.vDatetime(start_time).to_ical()
+            new_event["summary"] = event.name
+            new_event["description"] = f"{event.url}\n" + event.note
+            calendar.add_component(new_event)
+
+        with open(file_path, "wb") as f:
+            f.write(calendar.to_ical())
+            logger.log(logger.INFO, f"Successfully created {file_path} file")
 
 
 class Biathlon(BaseParser):
@@ -49,6 +61,8 @@ class Biathlon(BaseParser):
 
         self.web_content = []
         for event in events:
+            # explicit wait
+            time.sleep(0.1)
             event.click()
         time.sleep(0.25)
         page_html = self.webdriver.page_source
@@ -58,24 +72,26 @@ class Biathlon(BaseParser):
 
     def parse(self):
         events = self.web_content.find_all("li", {"class": "dcm-competition"})
+        if len(events) is 0:
+            logger.log(logger.WARNING, "No events found")
+        else:
+            logger.log(logger.INFO, f"{len(events)} events were found)")
         for event in events:
             time_str = event.find("span", {"class": "dcm-date"}).text
             event_name = event.find("span", {"class": "dcm-competition--name"}).text
             self.parsed_events.append(Biathlon.Event(name=event_name, time=time_str))
-
-    def export_to_cal(self, file_path = "Biathlon_events.ics"):
-        pass
 
     def process(self):
         if not self.web_content:
             self.get_website_content()
 
         self.parse()
-        self.export_to_cal()
+        self.export_to_cal(file_path="Biathlon_events.ics")
 
     def setup_webdriver(self):
         opts = Options()
-        # opts.add_argument("--headless")
+        opts.add_argument("--headless")
+        # opts.add_argument("--incognito")
 
         self.webdriver = webdriver.Chrome(options=opts, executable_path="C:\\chromedriver\\chromedriver.exe")
         self.webdriver.get(url=self.website)
